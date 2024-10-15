@@ -6,7 +6,7 @@ pub struct Config {
 
 impl Config {
     pub fn build(args: &[String]) -> Result<Config, &'static str> {
-        if args.len() < 1 {
+        if args.len() < 2 {
             return Err("Incorrect arguments supplied");
         }
 
@@ -27,14 +27,10 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
 }
 
 fn generate_char_table(contents: String) -> HashMap<char, usize> {
-    let mut char_map: HashMap<char, usize> = HashMap::new();
-
-    for char in contents.chars() {
-        let value = char_map.entry(char).or_insert(0);
-        *value += 1;
-    }
-
-    char_map
+    contents.chars().fold(HashMap::new(), |mut acc, char| {
+        *acc.entry(char).or_insert(0) += 1;
+        acc
+    })
 }
 
 #[cfg(test)]
