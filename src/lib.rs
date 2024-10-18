@@ -32,17 +32,6 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     // the keys and values to HuffNode
     let queue = build_priority_queue(char_table);
 
-    /*
-    while let Some(node) = queue.pop() {
-        match *node.0.root {
-            HuffNode::Leaf { element, weight } => {
-                println!("Value: {element}, weight: {weight}")
-            }
-            HuffNode::Internal { .. } => {}
-        }
-    }
-    */
-
     let huff_tree = build_huff_tree(queue);
 
     println!("{huff_tree:#?}");
