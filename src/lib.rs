@@ -3,7 +3,7 @@ use std::{
     cmp::{Ordering, Reverse},
     collections::{BinaryHeap, HashMap},
     error::Error,
-    fs, usize,
+    fs,
 };
 
 pub struct Config {
@@ -27,8 +27,9 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
 
     let char_table = generate_char_table(contents);
 
-    println!("{char_table:#?}");
-
+    // we are fine to consume the char_table here as
+    // its never needed again when we have converted
+    // the keys and values to HuffNode
     let mut queue = build_priority_queue(char_table);
 
     while let Some(node) = queue.pop() {
@@ -48,19 +49,6 @@ fn generate_char_table(contents: String) -> HashMap<char, usize> {
         *acc.entry(char).or_insert(0) += 1;
         acc
     })
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn create_char_table() {
-        let content: String = "hello".to_string();
-        let table: HashMap<char, usize> = HashMap::from([('h', 1), ('e', 1), ('l', 2), ('o', 1)]);
-
-        assert_eq!(table, generate_char_table(content))
-    }
 }
 
 #[derive(Debug)]
@@ -137,14 +125,51 @@ impl Ord for HuffTree {
     }
 }
 
-
 fn build_priority_queue(char_table: HashMap<char, usize>) -> BinaryHeap<Reverse<HuffTree>> {
+    // the initial queue will be leaf nodes only however at some point this
+    // needs to handle internal nodes...
     char_table
         .iter()
         .map(|(key, value)| {
-            // max-heap is lagest first so we want to use min-heap to buld our huffman tree
-            // https://doc.rust-lang.org/std/collections/struct.BinaryHeap.html#min-heap
+            // max-heap is largest first so we want
+            // to use min-heap to build the Huffman tree
             Reverse(HuffTree::new_leaf(*key, *value))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn create_char_table() {
+        let content: String = "hello".to_string();
+        let table: HashMap<char, usize> = HashMap::from([('h', 1), ('e', 1), ('l', 2), ('o', 1)]);
+
+        assert_eq!(table, generate_char_table(content))
+    }
+
+    #[test]
+    fn create_priority_queue() {
+        let content = generate_char_table("abbcccdddd".to_string());
+
+        // order is not guaranteed when iterating over a hash map so
+        // we need to ensure in this test that the smallest occurrence
+        // does not happen twice
+        let mut queue = build_priority_queue(content);
+
+        if let Some(value) = queue.pop() {
+            let node = &value.0.root;
+
+            match node {
+                HuffNode::Leaf { element, .. } => {
+                    assert_eq!('a', *element)
+                }
+                HuffNode::Internal { .. } => {
+                    todo!()
+                }
+            }
+        }
+    }
 }
