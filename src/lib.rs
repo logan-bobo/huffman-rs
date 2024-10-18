@@ -30,16 +30,22 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     // we are fine to consume the char_table here as
     // its never needed again when we have converted
     // the keys and values to HuffNode
-    let mut queue = build_priority_queue(char_table);
+    let queue = build_priority_queue(char_table);
 
+    /*
     while let Some(node) = queue.pop() {
-        match node.0.root {
+        match *node.0.root {
             HuffNode::Leaf { element, weight } => {
                 println!("Value: {element}, weight: {weight}")
             }
             HuffNode::Internal { .. } => {}
         }
     }
+    */
+
+    let huff_tree = build_huff_tree(queue);
+
+    println!("{huff_tree:#?}");
 
     Ok(())
 }
@@ -66,39 +72,49 @@ enum HuffNode {
 
 #[derive(Debug)]
 struct HuffTree {
-    root: HuffNode,
+    root: Box<HuffNode>,
 }
 
 impl HuffTree {
     fn new_leaf(element: char, weight: usize) -> Self {
         Self {
-            root: HuffNode::Leaf { element, weight },
+            root: Box::new(HuffNode::Leaf { element, weight }),
         }
     }
 
-    fn new_internal(left: HuffNode, right: HuffNode, weight: usize) -> Self {
+    fn new_internal(left: HuffNode, right: HuffNode) -> Self {
+        let left_weight = match left {
+            HuffNode::Internal { weight, .. } => weight,
+            HuffNode::Leaf { weight, .. } => weight,
+        };
+
+        let right_weight = match right {
+            HuffNode::Internal { weight, .. } => weight,
+            HuffNode::Leaf { weight, .. } => weight,
+        };
+
         Self {
-            root: HuffNode::Internal {
-                weight,
+            root: Box::new(HuffNode::Internal {
+                weight: left_weight + right_weight,
                 left: Box::new(left),
                 right: Box::new(right),
-            },
+            }),
         }
     }
 
     fn is_leaf(&self) -> bool {
-        matches!(self.root, HuffNode::Leaf { .. })
+        matches!(*self.root, HuffNode::Leaf { .. })
     }
 
     fn weight(&self) -> usize {
-        match self.root {
+        match *self.root {
             HuffNode::Internal { weight, .. } => weight,
             HuffNode::Leaf { weight, .. } => weight,
         }
     }
 
     fn value(&self) -> Option<char> {
-        match self.root {
+        match *self.root {
             HuffNode::Internal { .. } => None,
             HuffNode::Leaf { element, .. } => Some(element),
         }
@@ -138,6 +154,18 @@ fn build_priority_queue(char_table: HashMap<char, usize>) -> BinaryHeap<Reverse<
         .collect()
 }
 
+fn build_huff_tree(mut queue: BinaryHeap<Reverse<HuffTree>>) -> Reverse<HuffTree> {
+    // we need to iterate until there are two items left
+    while queue.len() > 1 {
+        let tmp1 = queue.pop().expect("expect better error handeling");
+        let tmp2 = queue.pop().expect("expect better error habdeling");
+        let tmp3 = Reverse(HuffTree::new_internal(*tmp1.0.root, *tmp2.0.root));
+
+        queue.push(tmp3);
+    }
+    queue.pop().expect("...")
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -160,16 +188,35 @@ mod test {
         let mut queue = build_priority_queue(content);
 
         if let Some(value) = queue.pop() {
-            let node = &value.0.root;
-
-            match node {
+            match *value.0.root {
                 HuffNode::Leaf { element, .. } => {
-                    assert_eq!('a', *element)
+                    assert_eq!('a', element)
                 }
                 HuffNode::Internal { .. } => {
                     todo!()
                 }
             }
         }
+    }
+
+    #[test]
+    fn create_huff_tree() {
+        let content = generate_char_table("aaabbc\n".to_string());
+        let queue = build_priority_queue(content);
+        let huff_tree = build_huff_tree(queue);
+
+        /*
+        The following is a visual aid for these tests
+        this is a representation on why the root must be 7
+
+        Root (7)
+        ├── Left: Leaf 'a' (3)
+        └── Right: Internal (4)
+            ├── Left: Leaf 'b' (2)
+            └── Right: Internal (2)
+                ├── Left: Leaf '\n' (1)
+                └── Right: Leaf 'c' (1)
+        */
+        assert_eq!(huff_tree.0.weight(), 7);
     }
 }
