@@ -289,13 +289,28 @@ mod test {
 
         let expected_table = HuffTable {
             rows: Vec::from([
-                HuffTableRow { char: 'a', frequency: 5, code: 0, bits: 1 },
-                HuffTableRow { char: 'b', frequency: 3, code: 2, bits: 2 },
-                HuffTableRow { char: 'c', frequency: 2, code: 6, bits: 3 },
+                HuffTableRow {
+                    char: 'a',
+                    frequency: 5,
+                    code: 0,
+                    bits: 1,
+                },
+                HuffTableRow {
+                    char: 'b',
+                    frequency: 3,
+                    code: 2,
+                    bits: 2,
+                },
+                HuffTableRow {
+                    char: 'c',
+                    frequency: 2,
+                    code: 6,
+                    bits: 3,
+                },
                 // Generation for nodes of equal length is not deterministic
             ]),
         };
-        
+
         for i in 0..expected_table.rows.len() {
             let expected_row: &HuffTableRow = &expected_table.rows[i];
             let huff_row: &HuffTableRow = &huff_table.rows[i];
