@@ -3,27 +3,33 @@ use std::{
     cmp::{Ordering, Reverse},
     collections::{BinaryHeap, HashMap},
     error::Error,
+    fmt::Display,
     fs,
 };
 
 pub struct Config {
-    pub file: String,
+    pub input_file: String,
+    pub output_file: String,
 }
 
 impl Config {
     pub fn build(args: &[String]) -> Result<Config, &'static str> {
-        if args.len() < 2 {
+        if args.len() < 3 {
             return Err("Incorrect arguments supplied");
         }
 
-        let file = args[1].clone();
+        let input_file = args[1].clone();
+        let output_file = args[2].clone();
 
-        Ok(Config { file })
+        Ok(Config {
+            input_file,
+            output_file,
+        })
     }
 }
 
 pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
-    let contents = fs::read_to_string(config.file)?;
+    let contents = fs::read_to_string(config.input_file)?;
 
     let char_table = generate_char_table(contents);
 
@@ -32,9 +38,14 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     // the keys and values to HuffNode
     let queue = build_priority_queue(char_table);
 
+    // TODO: Move the build huff tree to HuffTree::from_queue()
     let huff_tree = build_huff_tree(queue);
 
     println!("{huff_tree:#?}");
+
+    let huff_table = HuffTable::from_huff_tree(huff_tree);
+
+    println!("{huff_table:#?}");
 
     Ok(())
 }
@@ -82,30 +93,27 @@ impl HuffTree {
             HuffNode::Leaf { weight, .. } => weight,
         };
 
+        let total_weight = left_weight + right_weight;
+
+        let (left, right) = if left_weight <= right_weight {
+            (left, right)
+        } else {
+            (right, left)
+        };
+
         Self {
             root: Box::new(HuffNode::Internal {
-                weight: left_weight + right_weight,
+                weight: total_weight,
                 left: Box::new(left),
                 right: Box::new(right),
             }),
         }
     }
 
-    fn is_leaf(&self) -> bool {
-        matches!(*self.root, HuffNode::Leaf { .. })
-    }
-
     fn weight(&self) -> usize {
         match *self.root {
             HuffNode::Internal { weight, .. } => weight,
             HuffNode::Leaf { weight, .. } => weight,
-        }
-    }
-
-    fn value(&self) -> Option<char> {
-        match *self.root {
-            HuffNode::Internal { .. } => None,
-            HuffNode::Leaf { element, .. } => Some(element),
         }
     }
 }
@@ -126,7 +134,82 @@ impl PartialOrd for HuffTree {
 
 impl Ord for HuffTree {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.weight().cmp(&other.weight())
+        self.weight()
+            .cmp(&other.weight())
+            .then_with(|| match (&*self.root, &*other.root) {
+                (HuffNode::Leaf { .. }, HuffNode::Internal { .. }) => Ordering::Less,
+                (HuffNode::Internal { .. }, HuffNode::Leaf { .. }) => Ordering::Greater,
+                _ => Ordering::Equal,
+            })
+    }
+}
+
+#[derive(Debug)]
+struct HuffTable {
+    rows: Vec<HuffTableRow>,
+}
+
+impl HuffTable {
+    fn new() -> Self {
+        Self { rows: Vec::new() }
+    }
+
+    fn add_row(&mut self, char: char, frequency: usize, code: usize, bits: usize) {
+        self.rows.push(HuffTableRow {
+            char,
+            frequency,
+            code,
+            bits,
+        });
+    }
+
+    fn from_huff_tree(huff_tree: Reverse<HuffTree>) -> Self {
+        let mut table = Self::new();
+        Self::traverse_tree(&huff_tree.0.root, 0, 0, &mut table);
+        table
+    }
+
+    fn traverse_tree(node: &HuffNode, code: usize, bits: usize, table: &mut Self) {
+        match node {
+            HuffNode::Leaf { element, weight } => {
+                table.add_row(*element, *weight, code, bits);
+            }
+            HuffNode::Internal { left, right, .. } => {
+                Self::traverse_tree(left, code << 1, bits + 1, table);
+                Self::traverse_tree(right, (code << 1) | 1, bits + 1, table);
+            }
+        }
+    }
+}
+
+impl Display for HuffTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let _ = self.rows.iter().map(|value| {
+            write!(
+                f,
+                "{}, {}, {}, {}",
+                value.char, value.frequency, value.code, value.bits
+            )
+        });
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct HuffTableRow {
+    char: char,
+    frequency: usize,
+    code: usize,
+    bits: usize,
+}
+
+impl Display for HuffTableRow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}, {}, {}, {}",
+            self.char, self.frequency, self.code, self.bits
+        )
     }
 }
 
@@ -144,15 +227,13 @@ fn build_priority_queue(char_table: HashMap<char, usize>) -> BinaryHeap<Reverse<
 }
 
 fn build_huff_tree(mut queue: BinaryHeap<Reverse<HuffTree>>) -> Reverse<HuffTree> {
-    // we need to iterate until there are two items left
     while queue.len() > 1 {
-        let tmp1 = queue.pop().expect("expect better error handeling");
-        let tmp2 = queue.pop().expect("expect better error habdeling");
-        let tmp3 = Reverse(HuffTree::new_internal(*tmp1.0.root, *tmp2.0.root));
-
-        queue.push(tmp3);
+        let tmp1 = queue.pop().expect("expect better error handling");
+        let tmp2 = queue.pop().expect("expect better error handling");
+        let combined = HuffTree::new_internal(*tmp1.0.root, *tmp2.0.root);
+        queue.push(Reverse(combined));
     }
-    queue.pop().expect("...")
+    queue.pop().expect("better error handling")
 }
 
 #[cfg(test)]
@@ -181,8 +262,10 @@ mod test {
                 HuffNode::Leaf { element, .. } => {
                     assert_eq!('a', element)
                 }
+                // We never build a queue from internal nodes
+                // They are only ever pushed to the queue
                 HuffNode::Internal { .. } => {
-                    todo!()
+                    panic!("oh no we should not build a queue from internal nodes")
                 }
             }
         }
@@ -190,22 +273,36 @@ mod test {
 
     #[test]
     fn create_huff_tree() {
-        let content = generate_char_table("aaabbc\n".to_string());
+        let content = generate_char_table("aaaaabbbccd\n".to_string());
         let queue = build_priority_queue(content);
         let huff_tree = build_huff_tree(queue);
 
-        /*
-        The following is a visual aid for these tests
-        this is a representation on why the root must be 7
+        assert_eq!(huff_tree.0.weight(), 12);
+    }
 
-        Root (7)
-        ├── Left: Leaf 'a' (3)
-        └── Right: Internal (4)
-            ├── Left: Leaf 'b' (2)
-            └── Right: Internal (2)
-                ├── Left: Leaf '\n' (1)
-                └── Right: Leaf 'c' (1)
-        */
-        assert_eq!(huff_tree.0.weight(), 7);
+    #[test]
+    fn create_huff_table() {
+        let content = generate_char_table("aaaaabbbccd\n".to_string());
+        let queue = build_priority_queue(content);
+        let huff_tree = build_huff_tree(queue);
+        let huff_table = HuffTable::from_huff_tree(huff_tree);
+
+        let expected_table = HuffTable {
+            rows: Vec::from([
+                HuffTableRow { char: 'a', frequency: 5, code: 0, bits: 1 },
+                HuffTableRow { char: 'b', frequency: 3, code: 2, bits: 2 },
+                HuffTableRow { char: 'c', frequency: 2, code: 6, bits: 3 },
+                // Generation for nodes of equal length is not deterministic
+            ]),
+        };
+        
+        for i in 0..expected_table.rows.len() {
+            let expected_row: &HuffTableRow = &expected_table.rows[i];
+            let huff_row: &HuffTableRow = &huff_table.rows[i];
+            assert_eq!(expected_row.char, huff_row.char);
+            assert_eq!(expected_row.frequency, huff_row.frequency);
+            assert_eq!(expected_row.code, huff_row.code);
+            assert_eq!(expected_row.bits, huff_row.bits);
+        }
     }
 }
